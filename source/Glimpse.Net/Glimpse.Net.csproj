@@ -57,6 +57,9 @@
     <Compile Include="Converter\RouteValueDictionaryConverter.cs" />
     <Compile Include="Extentions.cs" />
     <Compile Include="Plugin\Mvc\Binders.cs" />
+    <Compile Include="Plugin\Mvc\Dependencies.cs" />
+    <Compile Include="Plumbing\GlimpseDependencyMetadata.cs" />
+    <Compile Include="Plumbing\GlimpseDependencyResolver.cs" />
     <Compile Include="Plumbing\GlimpseActionFilter.cs" />
     <Compile Include="Plumbing\GlimpseActionInvoker.cs" />
     <Compile Include="Plumbing\GlimpseAuthorizationFilter.cs" />

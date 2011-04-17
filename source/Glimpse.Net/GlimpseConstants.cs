@@ -5,6 +5,7 @@
         public const string Views = "Glimpse.Views";
         public const string ViewEngine = "Glimpse.ViewEngine";
         public const string Data = "__glimpseData";
+        public const string Dependencies = "Glimpse.Dependencies";
         public const string ClientName = "ClientName";
         public const string ClientRequestId = "ClientRequestID";
         public const string ActionDescriptor = "Glimpse.ActionDescriptor";
