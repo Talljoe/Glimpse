@@ -4,7 +4,6 @@ using System.ComponentModel.Composition;
 using System.ComponentModel.Composition.Hosting;
 using System.Configuration;
 using System.Linq;
-using System.Reflection;
 using System.Web;
 using Glimpse.Net.Configuration;
 using Glimpse.Net.Extensibility;
@@ -16,31 +15,27 @@ namespace Glimpse.Net
 {
     public class Module : IHttpModule
     {
-        private GlimpseConfiguration Configuration { get; set; }
-        private CompositionContainer Container { get; set; }
-        private GlimpseResponders Responders { get; set; }
-
-        [ImportMany]
-        private IList<Lazy<IGlimpsePlugin, IGlimpsePluginRequirements>> Plugins { get; set; }
+        private static ModuleState state;
+        private static readonly object gate = new object();
 
         public Module()
         {
             Configuration = ConfigurationManager.GetSection("glimpse") as GlimpseConfiguration ??
                             new GlimpseConfiguration();
-            Responders = new GlimpseResponders();
-            Plugins = new List<Lazy<IGlimpsePlugin, IGlimpsePluginRequirements>>();
         }
+
+        private GlimpseConfiguration Configuration { get; set; }
 
         public void Init(HttpApplication context)
         {
             if (Configuration.On == false) return; //Do nothing if Glimpse is off, events are not wired up
 
-            ComposePlugins(context); //Have MEF satisfy our needs
-
-            //Allow plugin's registered for Intialization to setup
-            foreach (var plugin in Plugins.Where(plugin => plugin.Metadata.ShouldSetupInInit))
+            lock (gate)
             {
-                plugin.Value.SetupInit(context);
+                if (state == null)
+                {
+                    state = new ModuleState(context);
+                }
             }
 
             context.BeginRequest += BeginRequest;
@@ -54,7 +49,7 @@ namespace Glimpse.Net
             HttpApplication httpApplication;
             if (!sender.IsValidRequest(out httpApplication, Configuration, false, false)) return;
 
-            var responder = Responders.GetResponderFor(httpApplication);
+            var responder = state.Responders.GetResponderFor(httpApplication);
             if (responder != null)
             {
                 responder.Respond(httpApplication, Configuration);
@@ -87,32 +82,15 @@ namespace Glimpse.Net
 
             var requestId = Guid.NewGuid();
 
-            var json = Responders.StandardResponse(httpApplication, requestId);
+            var json = state.Responders.StandardResponse(httpApplication, requestId);
 
             Persist(json, httpApplication, requestId);
         }
 
-        private void ComposePlugins(HttpApplication context)
-        {
-            var directoryCatalog = new SafeDirectoryCatalog("bin");
-
-            Container = new CompositionContainer(directoryCatalog);
-            Container.ComposeParts(this, Responders);
-
-            var store = context.GetWarningStore();
-            foreach (var exception in directoryCatalog.Exceptions)
-            {
-                store.Add(new[] {exception.GetType().Name, exception.Message});
-            }
-
-            //wireup converters into serializer
-            Responders.RegisterConverters();
-        }
-
         public void Dispose()
         {
-            if (Container != null)
-                Container.Dispose();
+            if (state.Container != null)
+                state.Container.Dispose();
         }
 
         private void Persist(string json, HttpApplication ctx, Guid requestId)
@@ -144,12 +122,12 @@ namespace Glimpse.Net
                               });
         }
 
-        private void ProcessData(HttpApplication httpApplication, bool sessionRequired)
+        private static void ProcessData(HttpApplication httpApplication, bool sessionRequired)
         {
             IDictionary<string, object> data;
             if (!httpApplication.TryGetData(out data)) return;
 
-            foreach (var plugin in Plugins.Where(p => p.Metadata.SessionRequired == sessionRequired))
+            foreach (var plugin in state.Plugins.Where(p => p.Metadata.SessionRequired == sessionRequired))
             {
                 var p = plugin.Value;
                 try
@@ -161,6 +139,46 @@ namespace Glimpse.Net
                 {
                     data.Add(p.Name, ex.Message);
                 }
+            }
+        }
+
+        private class ModuleState
+        {
+            public CompositionContainer Container { get; private set; }
+            public GlimpseResponders Responders { get; private set; }
+
+            [ImportMany]
+            public IList<Lazy<IGlimpsePlugin, IGlimpsePluginRequirements>> Plugins { get; private set; }
+
+            public ModuleState(HttpApplication context)
+            {
+                Responders = new GlimpseResponders();
+                Plugins = new List<Lazy<IGlimpsePlugin, IGlimpsePluginRequirements>>();
+
+                ComposePlugins(context); //Have MEF satisfy our needs
+
+                //Allow plugin's registered for Intialization to setup
+                foreach (var plugin in Plugins.Where(plugin => plugin.Metadata.ShouldSetupInInit))
+                {
+                    plugin.Value.SetupInit(context);
+                }
+            }
+
+            private void ComposePlugins(HttpApplication context)
+            {
+                var directoryCatalog = new SafeDirectoryCatalog("bin");
+
+                Container = new CompositionContainer(directoryCatalog);
+                Container.ComposeParts(this, Responders);
+
+                var store = context.GetWarningStore();
+                foreach (var exception in directoryCatalog.Exceptions)
+                {
+                    store.Add(new[] { exception.GetType().Name, exception.Message });
+                }
+
+                //wireup converters into serializer
+                Responders.RegisterConverters();
             }
         }
     }
