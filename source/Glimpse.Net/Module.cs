@@ -17,6 +17,7 @@ namespace Glimpse.Net
     {
         private static ModuleState state;
         private static readonly object gate = new object();
+        private static int refCount;
 
         public Module()
         {
@@ -36,6 +37,7 @@ namespace Glimpse.Net
                 {
                     state = new ModuleState(context);
                 }
+                ++refCount;
             }
 
             context.BeginRequest += BeginRequest;
@@ -89,8 +91,20 @@ namespace Glimpse.Net
 
         public void Dispose()
         {
-            if (state.Container != null)
-                state.Container.Dispose();
+            ModuleState myState = null;
+            lock (gate)
+            {
+                if (--refCount == 0)
+                {
+                    myState = state;
+                    state = null;
+                }
+            }
+
+            if (myState != null && myState.Container != null)
+            {
+                    myState.Container.Dispose();
+            }
         }
 
         private void Persist(string json, HttpApplication ctx, Guid requestId)
